@@ -94,6 +94,7 @@ pub fn router_with_state(state: AppState) -> Router {
         .route("/api/v1/notifications", get(list_notifications))
         .route("/api/v1/notifications/read", post(read_notifications))
         .route("/api/v1/events", get(list_events).post(create_event))
+        .route("/api/v1/mail/send", post(send_mail))
         .fallback(not_found)
         .layer(RequestBodyLimitLayer::new(1_048_576))
         .layer(
@@ -217,6 +218,28 @@ async fn status() -> Json<StatusResponse> {
         service: "paranoia-api",
         version: env!("CARGO_PKG_VERSION"),
     })
+}
+
+#[derive(serde::Deserialize)]
+struct OutgoingMail {
+    to: String,
+    subject: String,
+    body: String,
+}
+
+#[derive(Serialize)]
+struct SentMail {
+    from: String,
+}
+
+async fn send_mail(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+    Json(message): Json<OutgoingMail>,
+) -> Result<Json<SentMail>, AppError> {
+    admin(&state, &headers).await?;
+    let from = state.mailer.send_confirmed(&message.to, &message.subject, message.body).await?;
+    Ok(Json(SentMail { from }))
 }
 
 async fn register(
@@ -476,7 +499,7 @@ async fn accept_invitation(
     Path(invitation_id): Path<uuid::Uuid>,
     headers: axum::http::HeaderMap,
 ) -> Result<StatusCode, AppError> {
-    // Ouvert à tout compte: l'invitation est liée à l'email de l'invité (vérifié en SQL).
+
     let token = auth::bearer_token(&headers)?;
     let pool = state.database.as_ref().ok_or(AppError::Unavailable)?;
     let (user_id, email) = auth::user_from_token(pool, token).await?;
@@ -503,11 +526,7 @@ async fn create_task(
 ) -> Result<(StatusCode, Json<crate::domain::tasks::Task>), AppError> {
     let token = auth::bearer_token(&headers)?;
     let pool = state.database.as_ref().ok_or(AppError::Unavailable)?;
-    let (user_id, email) = auth::user_from_token(pool, token).await?;
-    // La création de tâches privées reste réservée aux admins; les membres d'une équipe créent dans leur équipe.
-    if input.workspace_id.is_none() {
-        auth::require_dev_admin(&email, &state.dev_admin_email)?;
-    }
+    let (user_id, _) = auth::user_from_token(pool, token).await?;
     services::tasks::create(pool, user_id, input)
         .await
         .map(|task| (StatusCode::CREATED, Json(task)))
