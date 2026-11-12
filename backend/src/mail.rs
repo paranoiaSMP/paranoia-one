@@ -55,13 +55,8 @@ impl Mailer {
     /// Envoi en tâche de fond: un échec SMTP ne doit jamais faire échouer l'action de l'utilisateur.
     pub fn send(&self, to: &str, subject: &str, body: String) {
         let Some(inner) = self.0.clone() else { return };
-        let message = to.parse::<Mailbox>().map_err(|e| e.to_string()).and_then(|to| {
-            let mut builder = Message::builder().from(inner.from.clone()).to(to).subject(subject);
-            if let Some(reply_to) = inner.reply_to.clone() {
-                builder = builder.reply_to(reply_to);
-            }
-            builder.header(ContentType::TEXT_PLAIN).body(body).map_err(|e| e.to_string())
-        });
+        let message = to.parse::<Mailbox>().map_err(|e| e.to_string())
+            .and_then(|to| inner.message(to, subject, body).map_err(|e| e.to_string()));
         match message {
             Ok(message) => {
                 tokio::spawn(async move {
@@ -72,5 +67,34 @@ impl Mailer {
             }
             Err(error) => tracing::error!(%error, "mail message rejected"),
         }
+    }
+}
+
+impl Inner {
+    fn message(&self, to: Mailbox, subject: &str, body: String) -> Result<Message, lettre::error::Error> {
+        let mut builder = Message::builder().from(self.from.clone()).to(to).subject(subject);
+        if let Some(reply_to) = self.reply_to.clone() {
+            builder = builder.reply_to(reply_to);
+        }
+        builder.header(ContentType::TEXT_PLAIN).body(body)
+    }
+}
+
+impl Mailer {
+    pub async fn send_confirmed(&self, to: &str, subject: &str, body: String) -> Result<String, crate::error::AppError> {
+        use crate::error::AppError;
+        let recipient = to.trim().parse::<lettre::Address>().map_err(|_| AppError::InvalidInput)?;
+        let subject = subject.trim();
+        if subject.is_empty() || subject.len() > 998 || subject.contains(['\r', '\n']) || body.trim().is_empty() {
+            return Err(AppError::InvalidInput);
+        }
+        let inner = self.0.as_ref().ok_or(AppError::Unavailable)?;
+        let message = inner.message(Mailbox::new(None, recipient), subject, body)
+            .map_err(|_| AppError::InvalidInput)?;
+        inner.transport.send(message).await.map_err(|error| {
+            tracing::warn!(status = ?error.status(), "SMTP delivery failed");
+            AppError::Internal
+        })?;
+        Ok(inner.from.email.to_string())
     }
 }
