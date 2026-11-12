@@ -1,0 +1,16 @@
+node_modules/
+dist/
+target/
+.idea/
+work/
+.env
+.env.*
+!apps/web/.env.development
+!apps/web/.env.production
+*.pem
+*.key
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.mobileprovision

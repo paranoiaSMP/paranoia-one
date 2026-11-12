@@ -1,0 +1,54 @@
+# ==============================================================================
+# Configuration Caddy — Paranoïa Studio (Production VPS)
+# ==============================================================================
+
+# 1. API Backend (Paranoïa One)
+api.paranoiastudio.fr {
+    encode zstd gzip
+
+    # Reverse proxy vers l'API Axum/Rust
+    reverse_proxy 127.0.0.1:8080 {
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+    }
+
+    # Sécurité
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+    }
+}
+
+# 2. Application Web (Frontend React)
+app.paranoiastudio.fr {
+    root * /var/www/paranoia-web/dist
+    encode zstd gzip
+
+    # Support du routage SPA (React)
+    try_files {path} /index.html
+
+    file_server
+
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "SAMEORIGIN"
+        Referrer-Policy "strict-origin-when-cross-origin"
+    }
+}
+
+# 3. Webmail Mailcow (SOGo)
+mail.paranoiastudio.fr {
+    encode zstd gzip
+
+    # Port d'écoute HTTP interne de Mailcow (ex: 8081 ou nginx-mailcow)
+    reverse_proxy 127.0.0.1:8081 {
+        header_up Host {host}
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+    }
+}

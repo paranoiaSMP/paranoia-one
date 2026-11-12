@@ -1,0 +1,20 @@
+# Base locale pour le dev. Lancer: docker compose -f infrastructure/docker/compose.yml up -d
+name: paranoia-one
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: paranoia
+      POSTGRES_PASSWORD: devpass
+      POSTGRES_DB: paranoia
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U paranoia"]
+      interval: 5s
+      retries: 10
+volumes:
+  pgdata:
